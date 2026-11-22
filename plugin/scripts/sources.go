@@ -26,7 +26,7 @@ type scope struct {
 	File     string
 	Line     int
 	Vars     []*envVar // OTEL_ variables in the order they're set; later ones win
-	Platform string    // "kubernetes", "compose" or "envfile"
+	Platform string    // "kubernetes", "compose", "envfile" or "configmap"
 	Mounts   []string  // absolute volumeMount mountPaths in this container
 	// LocalCollector is true when something in the same network namespace
 	// may listen on the OTLP ports, so localhost endpoints can work.
@@ -394,7 +394,11 @@ func containerMounts(file, label string, c *Node) ([]string, error) {
 			return nil, untrusted{file, fmt.Sprintf("%s: volumeMount at line %d isn't an object", label, m.Line)}
 		}
 		mountPath, ok := scalar(mapGet(m, "mountPath"))
-		if !ok || mountPath == "" {
+		if !ok {
+			return nil, untrusted{file, fmt.Sprintf("%s: volumeMount at line %d has no mountPath", label, m.Line)}
+		}
+		mountPath = strings.TrimSpace(mountPath)
+		if mountPath == "" {
 			return nil, untrusted{file, fmt.Sprintf("%s: volumeMount at line %d has no mountPath", label, m.Line)}
 		}
 		if strings.HasPrefix(mountPath, "/") {

@@ -83,6 +83,28 @@ spec:
 	if len(rep.Findings) != 0 {
 		t.Errorf("with mount: got %v", rules(rep))
 	}
+
+	paddedMount := strings.Replace(withMount, "mountPath: /etc/otel", `mountPath: " /etc/otel "`, 1)
+	rep, r = runJSON(t, []byte(paddedMount), "-")
+	if r.code == 2 {
+		t.Fatalf("unexpected refusal: %s", r.stderr)
+	}
+	if len(rep.Findings) != 0 {
+		t.Errorf("with padded mount: got %v", rules(rep))
+	}
+
+	clientKey := strings.Replace(withoutMount, "OTEL_EXPORTER_OTLP_CERTIFICATE", "OTEL_EXPORTER_OTLP_CLIENT_KEY", 1)
+	clientKey = strings.Replace(clientKey, "/etc/otel/ca.pem", "/etc/otel/private.key", 1)
+	rep, r = runJSON(t, []byte(clientKey), "-")
+	if r.code == 2 {
+		t.Fatalf("unexpected refusal: %s", r.stderr)
+	}
+	if got := strings.Join(rules(rep), ","); got != "MEDIUM LS108" {
+		t.Errorf("client key without mount: got %s, want MEDIUM LS108", got)
+	}
+	if strings.Contains(r.stdout+r.stderr, "/etc/otel/private.key") {
+		t.Errorf("client key path leaked in output: stdout=%s stderr=%s", r.stdout, r.stderr)
+	}
 }
 
 // Real configs from projects that run them must stay quiet.

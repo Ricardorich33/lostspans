@@ -124,12 +124,27 @@ func check(sc *scope) []Finding {
 	return c.out
 }
 
-// protocol/exporter.md defines these variables as paths to a trusted
-// certificate, a client key, and a client certificate.
-var certificatePathVars = map[string]bool{
-	"OTEL_EXPORTER_OTLP_CERTIFICATE":        true,
-	"OTEL_EXPORTER_OTLP_CLIENT_KEY":         true,
-	"OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE": true,
+// protocol/exporter.md defines the base and signal-specific certificate,
+// client key, and client certificate variables as file paths.
+var certificatePathVars = func() map[string]bool {
+	m := map[string]bool{
+		"OTEL_EXPORTER_OTLP_CERTIFICATE":        true,
+		"OTEL_EXPORTER_OTLP_CLIENT_KEY":         true,
+		"OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE": true,
+	}
+	for _, signal := range []string{"TRACES", "METRICS", "LOGS"} {
+		for _, suffix := range []string{"CERTIFICATE", "CLIENT_KEY", "CLIENT_CERTIFICATE"} {
+			m["OTEL_EXPORTER_OTLP_"+signal+"_"+suffix] = true
+		}
+	}
+	return m
+}()
+
+var systemTrustPrefixes = []string{
+	"/etc/ssl/certs",
+	"/etc/pki",
+	"/usr/share/ca-certificates",
+	"/usr/local/share/ca-certificates",
 }
 
 // checkFilePaths reports an absolute certificate or key path that no
@@ -146,18 +161,35 @@ func (c *checker) checkFilePaths() {
 			continue
 		}
 		p := strings.TrimSpace(v.Value)
-		if !strings.HasPrefix(p, "/") || pathCoveredByMount(p, c.sc.Mounts) {
+		if !strings.HasPrefix(p, "/") || isSystemTrustPath(p) || pathCoveredByMount(p, c.sc.Mounts) {
 			continue
 		}
-		c.add(Medium, "LS108", v, fmt.Sprintf("%s names a file, but no volumeMount in this container covers %q. If the file isn't in the image, the SDK can't read it and TLS export fails.", name, p),
+		shown := display(v)
+		var message string
+		if shown == "(hidden)" {
+			message = fmt.Sprintf("%s names a file, but no volumeMount in this container covers it. If the file isn't in the image, the SDK can't read it and TLS export fails.", name)
+		} else {
+			message = fmt.Sprintf("%s names a file, but no volumeMount in this container covers %q. If the file isn't in the image, the SDK can't read it and TLS export fails.", name, shown)
+		}
+		c.add(Medium, "LS108", v, message,
 			"mount the file at that path, or set the variable to the file's in-container path")
 	}
+}
+
+func isSystemTrustPath(filePath string) bool {
+	filePath = pathpkg.Clean(filePath)
+	for _, prefix := range systemTrustPrefixes {
+		prefix = pathpkg.Clean(prefix)
+		if filePath == prefix || strings.HasPrefix(filePath, strings.TrimSuffix(prefix, "/")+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func pathCoveredByMount(filePath string, mounts []string) bool {
 	filePath = pathpkg.Clean(filePath)
 	for _, mount := range mounts {
-		mount = pathpkg.Clean(mount)
 		if filePath == mount || strings.HasPrefix(filePath, strings.TrimSuffix(mount, "/")+"/") {
 			return true
 		}

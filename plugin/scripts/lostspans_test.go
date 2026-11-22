@@ -150,6 +150,35 @@ func TestCertificatePathsRequireMounts(t *testing.T) {
 			t.Errorf("%s: got %v", name, got)
 		}
 	}
+	for _, signal := range []string{"TRACES", "METRICS", "LOGS"} {
+		for _, suffix := range []string{"CERTIFICATE", "CLIENT_KEY", "CLIENT_CERTIFICATE"} {
+			name := "OTEL_EXPORTER_OTLP_" + signal + "_" + suffix
+			sc := envScope(name + "=/etc/otel/client.pem")
+			if got := rulesOf(check(sc)); strings.Join(got, ",") != "MEDIUM LS108" {
+				t.Errorf("%s: got %v", name, got)
+			}
+		}
+	}
+	for _, path := range []string{
+		"/etc/ssl/certs/ca-certificates.crt",
+		"/etc/pki/tls/certs/ca-bundle.crt",
+		"/usr/share/ca-certificates/mozilla/test.crt",
+		"/usr/local/share/ca-certificates/test.crt",
+	} {
+		sc := envScope("OTEL_EXPORTER_OTLP_CERTIFICATE=" + path)
+		if got := check(sc); len(got) != 0 {
+			t.Errorf("system trust path %s should be quiet, got %v", path, rulesOf(got))
+		}
+	}
+	const clientKeyPath = "/etc/otel/private.key"
+	sc = envScope("OTEL_EXPORTER_OTLP_CLIENT_KEY=" + clientKeyPath)
+	fs := check(sc)
+	if len(fs) != 1 || fs[0].Rule != "LS108" {
+		t.Fatalf("client key: got %v", rulesOf(fs))
+	}
+	if strings.Contains(fs[0].Value+fs[0].Message+fs[0].Fix, clientKeyPath) {
+		t.Errorf("client key path leaked in finding: %+v", fs[0])
+	}
 }
 
 func TestLocalhostWithCollectorSidecar(t *testing.T) {
